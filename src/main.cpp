@@ -1,135 +1,593 @@
+// array_visualizer.cpp
+// Single-file raylib program: Interactive Array Visualizer with UI buttons and text input
+// Requires: raylib (and raymath.h) installed
+// Compile example (Linux): g++ -std=c++17 -O2 -lraylib array_visualizer.cpp -o array_visualizer
+
 #include "raylib.h"
+#include "raymath.h"
+
+#include <vector>
 #include <string>
 #include <sstream>
-#include <cstdlib>
+#include <algorithm>
+#include <cmath>
+#include <optional>
 
-int main() {
-    const int screenWidth = 800;
-    const int screenHeight = 600;
-    const int arraySize = 10;
+// ---------- Configurable constants ----------
+static const int SCREEN_W = 1100;
+static const int SCREEN_H = 650;
 
-    InitWindow(screenWidth, screenHeight, " Array Visualizer");
+static const int UI_PANEL_H = 100;
+static const float BOX_W = 72.0f;
+static const float BOX_H = 72.0f;
+static const float BOX_SPACING = 16.0f;
+static const float ARRAY_START_X = 50.0f;
+static const float ARRAY_Y = (SCREEN_H - UI_PANEL_H) / 2.0f - BOX_H * 0.5f;
+
+static const float MOVE_SPEED = 6.0f; // higher -> faster interpolation
+static const Color BACKGROUND = {22, 28, 35, 255};
+
+// colors for states
+static const Color COL_BOX = {40, 44, 52, 255};
+static const Color COL_BORDER = {100, 110, 120, 255};
+static const Color COL_ACTIVE = {235, 147, 64, 255};    // active/selected
+static const Color COL_COMPARE = {66, 135, 245, 255};   // being compared
+static const Color COL_SWAP = {245, 66, 66, 255};       // swap highlight
+static const Color COL_TARGET = {77, 201, 116, 255};    // insertion target
+static const Color COL_TEXT = WHITE;
+
+// ---------- Utility ----------
+struct Button {
+    Rectangle rect;
+    std::string label;
+    bool enabled = true;
+
+    bool DrawAndHandle()
+    {
+        Color bg = enabled ? Fade(RAYWHITE, 0.05f) : Fade(RAYWHITE, 0.02f);
+        Vector2 m = GetMousePosition();
+        bool hover = enabled && CheckCollisionPointRec(m, rect);
+        bool pressed = hover && IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && enabled;
+
+        // draw
+        Color fill = enabled ? (hover ? LIGHTGRAY : bg) : DARKGRAY;
+        DrawRectangleRec(rect, fill);
+        DrawRectangleLinesEx(rect, 2.0f, COL_BORDER);
+        int fontSize = 18;
+        int textW = MeasureText(label.c_str(), fontSize);
+        DrawText(label.c_str(), (int)(rect.x + rect.width * 0.5f - textW * 0.5f),
+                 (int)(rect.y + rect.height * 0.5f - fontSize * 0.5f), fontSize, BLACK);
+
+        return pressed;
+    }
+};
+
+// ---------- Visual element ----------
+struct VElement {
+    int value;
+    Vector2 pos;       // current on-screen pos
+    Vector2 target;    // target pos to interpolate toward
+    float scale = 1.0f;
+    float alpha = 1.0f;
+    Color color = COL_BOX;
+    bool moving = false;
+
+    VElement(int v = 0, Vector2 p = {0,0}) : value(v), pos(p), target(p) {}
+};
+
+// ---------- ArrayVisualizer ----------
+class ArrayVisualizer {
+public:
+    ArrayVisualizer()
+    {
+        elements.reserve(64);
+    }
+
+    void Draw()
+    {
+        // draw elements
+        for (size_t i = 0; i < elements.size(); ++i) {
+            const VElement &e = elements[i];
+            DrawElement(e, (int)i);
+        }
+    }
+
+    void Update(float dt)
+    {
+        // move elements toward target positions
+        bool anyMoving = false;
+        for (auto &e : elements) {
+            // interpolate position
+            e.pos = Vector2Lerp(e.pos, e.target, std::min(1.0f, MOVE_SPEED * dt));
+            // clamp small distances
+            if (Vector2Distance(e.pos, e.target) > 0.5f) {
+                anyMoving = true;
+                e.moving = true;
+            } else {
+                e.pos = e.target;
+                e.moving = false;
+            }
+            // simple interpolation for scale/alpha if needed (not heavy)
+            e.scale = Lerp(e.scale, 1.0f, std::min(1.0f, MOVE_SPEED * dt));
+            e.alpha = Lerp(e.alpha, 1.0f, std::min(1.0f, MOVE_SPEED * dt));
+        }
+
+        // If an animation step was triggered (e.g., compare / swap), check if finished then progress
+        if (runningMode == Mode::SEARCHING) {
+            if (!AnyElementMoving()) {
+                // continue searching
+                ContinueSearch();
+            }
+        } else if (runningMode == Mode::SORTING) {
+            if (!AnyElementMoving()) {
+                ContinueSort();
+            }
+        } else if (runningMode == Mode::SHIFTING) {
+            if (!AnyElementMoving()) {
+                // shifting finished
+                runningMode = Mode::IDLE;
+                unlockUI();
+            }
+        } else if (runningMode == Mode::DELETING) {
+            if (!AnyElementMoving()) {
+                // finalize deletion
+                finalizeDelete();
+                runningMode = Mode::IDLE;
+                unlockUI();
+            }
+        } else if (runningMode == Mode::INSERTING) {
+            if (!AnyElementMoving()) {
+                // insertion finished (element placed)
+                runningMode = Mode::IDLE;
+                unlockUI();
+            }
+        }
+    }
+
+    // UI-level getters
+    size_t size() const { return elements.size(); }
+
+    // Add initial elements
+    void InitWith(const std::vector<int>& vals)
+    {
+        elements.clear();
+        for (size_t i = 0; i < vals.size(); ++i) {
+            Vector2 p = indexToPos((int)i);
+            VElement v(vals[i], p);
+            elements.push_back(v);
+        }
+        updateTargets();
+    }
+
+    // Insert value at index (if index > size -> push back)
+    void RequestInsert(int value, int index)
+    {
+        if (running()) return; // ignore while animating
+        index = std::clamp(index, 0, (int)elements.size());
+        // create new element at target index but start slightly above for animation
+        Vector2 newPos = indexToPos(index);
+        Vector2 startPos = { newPos.x, newPos.y - 120.0f };
+        VElement ve(value, startPos);
+        ve.target = newPos;
+        ve.scale = 0.7f;
+        ve.color = COL_TARGET;
+
+        elements.insert(elements.begin() + index, ve);
+        // shift targets of elements after inserted index
+        updateTargets();
+        // set mode so Update continues and unlock UI only when finished
+        runningMode = Mode::INSERTING;
+        lockUI();
+    }
+
+    // Delete by index
+    void RequestDeleteAt(int index)
+    {
+        if (running() || elements.empty()) return;
+        if (index < 0 || index >= (int)elements.size()) return;
+        // animate deletion: scale down & fade out then remove & shift
+        // We'll mark one element to shrink and then in finalizeDelete we remove it and shift others
+        deletingIndex = index;
+        elements[index].scale = 1.0f;
+        elements[index].color = COL_SWAP;
+        // target unchanged; but animate scale to 0 and alpha to 0 over time by setting immediate targets via lambda inside Update.
+        // We'll use a simplistic approach: set scale target to 0 by manually decaying scale in Update loop while in DELETING state.
+        runningMode = Mode::DELETING;
+        lockUI();
+
+        // set others' targets now to shift later (they will start shifting after we remove the element)
+    }
+
+    // Search for value (linear)
+    void RequestSearchValue(int value)
+    {
+        if (running()) return;
+        searchValue = value;
+        searchIndex = 0;
+        // reset colors
+        resetColors();
+        runningMode = Mode::SEARCHING;
+        lockUI();
+    }
+
+    // Start bubble sort (animated step-by-step)
+    void RequestSort()
+    {
+        if (running()) return;
+        runningMode = Mode::SORTING;
+        sortI = 0;
+        sortJ = 0;
+        resetColors();
+        lockUI();
+    }
+
+    // Small helper: returns whether animator is running
+    bool running() const { return runningMode != Mode::IDLE; }
+
+private:
+    enum class Mode { IDLE, INSERTING, SHIFTING, DELETING, SEARCHING, SORTING };
+    Mode runningMode = Mode::IDLE;
+
+    std::vector<VElement> elements;
+
+    // delete helpers
+    int deletingIndex = -1;
+
+    // search helpers
+    int searchValue = 0;
+    int searchIndex = 0;
+
+    // sort helpers (bubble)
+    int sortI = 0;
+    int sortJ = 0;
+
+    // UI lock callback (simple flags; UI code checks these)
+    bool uiLocked = false;
+    void lockUI() { uiLocked = true; }
+    void unlockUI() { uiLocked = false; }
+public:
+    bool isUILocked() const { return uiLocked; }
+
+private:
+    // Update target positions based on current element order
+    void updateTargets()
+    {
+        for (size_t i = 0; i < elements.size(); ++i) {
+            elements[i].target = indexToPos((int)i);
+        }
+    }
+
+    Vector2 indexToPos(int idx) const
+    {
+        float x = ARRAY_START_X + idx * (BOX_W + BOX_SPACING);
+        float y = ARRAY_Y;
+        return { x, y };
+    }
+
+    void DrawElement(const VElement &e, int idx) const
+    {
+        Vector2 pos = e.pos;
+        float w = BOX_W * e.scale;
+        float h = BOX_H * e.scale;
+        Rectangle r = { pos.x - (BOX_W - w) * 0.5f, pos.y - (BOX_H - h) * 0.5f, w, h };
+        Color col = e.color;
+        col.a = (unsigned char)(e.alpha * 255.0f);
+
+        DrawRectangleRounded(r, 0.12f, 6, col);
+        DrawRectangleRoundedLinesEx(r, 0.12f, 6, 2.0f, COL_BORDER);
+
+        // value text
+        std::string s = std::to_string(e.value);
+        int fs = 20;
+        int tw = MeasureText(s.c_str(), fs);
+        DrawText(s.c_str(), (int)(r.x + r.width * 0.5f - tw * 0.5f),
+                 (int)(r.y + r.height * 0.5f - fs * 0.5f), fs, COL_TEXT);
+    }
+
+    bool AnyElementMoving() const
+    {
+        for (const auto &e : elements) if (e.moving) return true;
+        return false;
+    }
+
+    void resetColors()
+    {
+        for (auto &e : elements) e.color = COL_BOX;
+    }
+
+    // Called each frame while SEARCHING and not moving to step to next index
+    void ContinueSearch()
+    {
+        // if searchIndex >= size -> not found
+        if (searchIndex >= (int)elements.size()) {
+            // search finished
+            // maybe flash "not found" by coloring none; here we just unlock UI
+            runningMode = Mode::IDLE;
+            unlockUI();
+            return;
+        }
+
+        // highlight current element
+        resetColors();
+        elements[searchIndex].color = COL_ACTIVE;
+
+        // if equal -> highlight target and stop
+        if (elements[searchIndex].value == searchValue) {
+            elements[searchIndex].color = COL_TARGET;
+            runningMode = Mode::IDLE;
+            unlockUI();
+            return;
+        } else {
+            // animate a small hop or color change to indicate check
+            // We'll animate a tiny vertical movement
+            Vector2 orig = elements[searchIndex].target;
+            elements[searchIndex].pos.y = orig.y - 18.0f; // quick jump up
+            elements[searchIndex].target.y = orig.y;     // then return to target
+            // increment index to check next once movement completes
+            searchIndex++;
+            // keep runningMode = SEARCHING
+        }
+    }
+
+    // Called each frame while SORTING and not moving to perform next compare/swap step
+    void ContinueSort()
+    {
+        int n = (int)elements.size();
+        if (n < 2) {
+            runningMode = Mode::IDLE;
+            unlockUI();
+            return;
+        }
+
+        if (sortI >= n - 1) {
+            // finished
+            resetColors();
+            runningMode = Mode::IDLE;
+            unlockUI();
+            return;
+        }
+        if (sortJ >= n - 1 - sortI) {
+            // advance i
+            sortJ = 0;
+            sortI++;
+            // continue
+            return;
+        }
+
+        // highlight pair being compared
+        resetColors();
+        elements[sortJ].color = COL_COMPARE;
+        elements[sortJ + 1].color = COL_COMPARE;
+
+        // small delay simulation: use a short upward movement then compare
+        // We'll animate a slight vertical lift for the pair, then either swap or return.
+        Vector2 aTarget = elements[sortJ].target;
+        Vector2 bTarget = elements[sortJ + 1].target;
+
+        // create lifted targets to show comparison (small vertical offset)
+        elements[sortJ].pos.y = aTarget.y - 14.0f;
+        elements[sortJ].target.y = aTarget.y;
+        elements[sortJ+1].pos.y = bTarget.y - 14.0f;
+        elements[sortJ+1].target.y = bTarget.y;
+
+        // After movement settles, logic will re-enter ContinueSort() again
+        // Decide swap immediately in state, then animate swap by exchanging target positions
+        if (elements[sortJ].value > elements[sortJ + 1].value) {
+            // swap the elements in the container but animate positions by swapping targets
+            // To get a smooth swap, we swap the target positions and then swap elements in vector after movement finishes.
+            // Simpler approach: swap elements in vector now but set their targets accordingly.
+            std::swap(elements[sortJ], elements[sortJ + 1]);
+            // Now fix their visual target positions to where they should be
+            updateTargets();
+            // mark colors
+            elements[sortJ].color = COL_SWAP;
+            elements[sortJ + 1].color = COL_SWAP;
+        } else {
+            // no swap; keep colors as compare and just advance indices
+            // nothing else to animate; we already did a tiny lift-return
+        }
+
+        // advance j
+        sortJ++;
+    }
+
+    // finalize delete after shrink animation completed
+    void finalizeDelete()
+    {
+        if (deletingIndex < 0 || deletingIndex >= (int)elements.size()) {
+            deletingIndex = -1;
+            return;
+        }
+
+        // remove element
+        elements.erase(elements.begin() + deletingIndex);
+        deletingIndex = -1;
+        // update targets of remaining elements
+        updateTargets();
+    }
+
+    // Linear interpolation helper
+    static float Lerp(float a, float b, float t) { return a + (b - a) * t; }
+};
+
+// ---------- Simple TextInput control (only integer support) ----------
+struct IntTextInput {
+    Rectangle rect;
+    std::string content;
+    bool active = false;
+    std::string placeholder = "";
+
+    IntTextInput() {}
+    IntTextInput(Rectangle r, std::string ph = "") : rect(r), placeholder(ph) {}
+
+    void Draw()
+    {
+        Color bg = active ? Fade(RAYWHITE, 0.07f) : Fade(RAYWHITE, 0.03f);
+        DrawRectangleRec(rect, bg);
+        DrawRectangleLinesEx(rect, 2.0f, COL_BORDER);
+
+        std::string display = content.empty() ? placeholder : content;
+        int fs = 20;
+        int tw = MeasureText(display.c_str(), fs);
+        Color col = content.empty() ? GRAY : BLACK;
+        DrawText(display.c_str(), (int)(rect.x + 8), (int)(rect.y + rect.height * 0.5f - fs * 0.5f), fs, col);
+
+        if (active) {
+            // cursor
+            int cx = (int)(rect.x + 8 + tw + 4);
+            DrawLine(cx, (int)(rect.y + 8), cx, (int)(rect.y + rect.height - 8), BLACK);
+        }
+    }
+
+    void HandleInput()
+    {
+        Vector2 m = GetMousePosition();
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            if (CheckCollisionPointRec(m, rect)) {
+                active = true;
+                // Clear on click to ease input (optional)
+                // content.clear();
+            } else {
+                active = false;
+            }
+        }
+
+        if (!active) return;
+
+        int key = GetCharPressed();
+        while (key > 0) {
+            // only allow digits and minus sign at first position
+            if ((key >= '0' && key <= '9') || (key == '-' && content.empty())) {
+                content.push_back((char)key);
+            }
+            key = GetCharPressed();
+        }
+        if (IsKeyPressed(KEY_BACKSPACE)) {
+            if (!content.empty()) content.pop_back();
+        }
+        // optional: allow Enter to deactivate
+        if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER)) {
+            active = false;
+        }
+    }
+
+    std::optional<int> GetValue() const
+    {
+        if (content.empty()) return std::nullopt;
+        try {
+            int v = std::stoi(content);
+            return v;
+        } catch (...) {
+            return std::nullopt;
+        }
+    }
+
+    void SetText(const std::string &s) { content = s; }
+    void Clear() { content.clear(); }
+};
+
+// ---------- Main ----------
+int main()
+{
+    InitWindow(SCREEN_W, SCREEN_H, "Array Visualizer - raylib");
     SetTargetFPS(60);
 
-    // Array and UI variables
-    int array[arraySize] = { 0 };
-    int currentValue = 0;
-    int selectedIndex = 0;
+    // load fonts if desired; we'll use default for brevity
 
-    // Beautiful color palette
-    Color arrayColors[arraySize] = {
-        Color{255, 107, 107, 255},    // Coral Red
-        Color{255, 206, 107, 255},    // Peach
-        Color{255, 255, 107, 255},    // Lemon Yellow
-        Color{177, 255, 107, 255},    // Lime Green
-        Color{107, 255, 157, 255},    // Mint
-        Color{107, 255, 255, 255},    // Sky Blue
-        Color{107, 157, 255, 255},    // Light Blue
-        Color{157, 107, 255, 255},    // Lavender
-        Color{255, 107, 255, 255},    // Pink
-        Color{255, 107, 157, 255}     // Rose
-    };
+    ArrayVisualizer viz;
 
-    // UI element rectangles
-    Rectangle valuePlusButton = { 300, 450, 40, 40 };
-    Rectangle valueMinusButton = { 350, 450, 40, 40 };
-    Rectangle indexPlusButton = { 300, 500, 40, 40 };
-    Rectangle indexMinusButton = { 350, 500, 40, 40 };
-    Rectangle setButton = { 420, 475, 200, 40 };
+    // initialize with some sample data
+    std::vector<int> initial = {10, 4, 7, 2, 9, 11};
+    viz.InitWith(initial);
 
-    while (!WindowShouldClose()) {
-        // Handle mouse input
-        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-            Vector2 mousePos = GetMousePosition();
+    // UI elements
+    Button btnInsert{ {880, 20, 180, 36}, "Insert" };
+    Button btnDelete{ {880, 20 + 44, 180, 36}, "Delete" };
+    Button btnSearch{ {880, 20 + 88, 180, 36}, "Search" };
+    Button btnSort{ {880, 20 + 132, 180, 36}, "Sort (Bubble)" };
 
-            // Check button clicks
-            if (CheckCollisionPointRec(mousePos, valuePlusButton)) {
-                currentValue++;
+    IntTextInput inputValue({700, 20, 160, 36}, "value");
+    IntTextInput inputIndex({700, 20 + 44, 160, 36}, "index");
+
+    std::string infoMsg = "Click an operation. UI locked while animations run.";
+
+    while (!WindowShouldClose())
+    {
+        float dt = GetFrameTime();
+
+        // Handle inputs
+        inputValue.HandleInput();
+        inputIndex.HandleInput();
+
+        // Draw
+        BeginDrawing();
+        ClearBackground(BACKGROUND);
+
+        // UI panel background
+        DrawRectangle(0, 0, SCREEN_W, UI_PANEL_H, Fade(RAYWHITE, 0.03f));
+        DrawLine(0, UI_PANEL_H, SCREEN_W, UI_PANEL_H, Fade(COL_BORDER, 0.6f));
+
+        // draw UI elements
+        inputValue.Draw();
+        inputIndex.Draw();
+
+        // disable buttons when viz is locked
+        bool locked = viz.isUILocked();
+        btnInsert.enabled = !locked;
+        btnDelete.enabled = !locked;
+        btnSearch.enabled = !locked;
+        btnSort.enabled = !locked;
+
+        if (btnInsert.DrawAndHandle()) {
+            // get values
+            auto vOpt = inputValue.GetValue();
+            auto iOpt = inputIndex.GetValue();
+            if (!vOpt.has_value()) {
+                infoMsg = "Provide integer value to insert.";
+            } else {
+                int val = vOpt.value();
+                int idx = iOpt.has_value() ? iOpt.value() : (int)viz.size(); // default append
+                viz.RequestInsert(val, idx);
+                infoMsg = "Inserting " + std::to_string(val) + " at index " + std::to_string(idx) + "...";
+                // optionally clear input
+                // inputValue.Clear();
+                // inputIndex.Clear();
             }
-            else if (CheckCollisionPointRec(mousePos, valueMinusButton)) {
-                currentValue--;
-            }
-            else if (CheckCollisionPointRec(mousePos, indexPlusButton)) {
-                selectedIndex = (selectedIndex + 1) % arraySize;
-            }
-            else if (CheckCollisionPointRec(mousePos, indexMinusButton)) {
-                selectedIndex = (selectedIndex - 1 + arraySize) % arraySize;
-            }
-            else if (CheckCollisionPointRec(mousePos, setButton)) {
-                if (selectedIndex >= 0 && selectedIndex < arraySize) {
-                    array[selectedIndex] = currentValue;
+        }
+        if (btnDelete.DrawAndHandle()) {
+            auto iOpt = inputIndex.GetValue();
+            if (!iOpt.has_value()) {
+                infoMsg = "Provide an index to delete.";
+            } else {
+                int idx = iOpt.value();
+                if (idx < 0 || idx >= (int)viz.size()) {
+                    infoMsg = "Index out of range.";
+                } else {
+                    viz.RequestDeleteAt(idx);
+                    infoMsg = "Deleting element at index " + std::to_string(idx) + "...";
                 }
             }
         }
-
-        // Drawing
-        BeginDrawing();
-        ClearBackground(Color{ 25, 25, 35, 255 }); // Dark blue-gray background
-
-        // Draw array elements
-        for (int i = 0; i < arraySize; i++) {
-            int x = 100 + i * 60;
-            int y = 200;
-            int width = 50;
-            int height = 50;
-
-            // Highlight selected index
-            Color borderColor = (i == selectedIndex) ? Color{ 255, 255, 0, 255 } : Color{ 255, 255, 255, 200 };
-            float borderThickness = (i == selectedIndex) ? 3.0f : 1.0f;
-
-           
-            // Draw border
-            DrawRectangleLinesEx(Rectangle{ (float)x, (float)y, (float)width, (float)height }, borderThickness, borderColor);
-
-            // Draw index number
-            DrawText(TextFormat("%d", i), x + 20, y - 30, 20, Color{ 200, 200, 200, 255 });
-
-            // Draw value
-            DrawText(TextFormat("%d", array[i]), x + 15, y + 15, 20, WHITE);
+        if (btnSearch.DrawAndHandle()) {
+            auto vOpt = inputValue.GetValue();
+            if (!vOpt.has_value()) {
+                infoMsg = "Provide integer value to search.";
+            } else {
+                viz.RequestSearchValue(vOpt.value());
+                infoMsg = "Searching for " + std::to_string(vOpt.value()) + "...";
+            }
+        }
+        if (btnSort.DrawAndHandle()) {
+            viz.RequestSort();
+            infoMsg = "Starting bubble sort...";
         }
 
-        // Draw UI elements
-        // Value controls
-        bool valuePlusHovered = CheckCollisionPointRec(GetMousePosition(), valuePlusButton);
-        bool valueMinusHovered = CheckCollisionPointRec(GetMousePosition(), valueMinusButton);
+        // draw info
+        DrawText(infoMsg.c_str(), 16, 14, 18, LIGHTGRAY);
 
-        DrawRectangleRec(valuePlusButton, valuePlusHovered ? Color{ 86, 214, 86, 255 } : Color{ 66, 194, 66, 255 });
-        DrawRectangleRec(valueMinusButton, valueMinusHovered ? Color{ 214, 86, 86, 255 } : Color{ 194, 66, 66, 255 });
-        DrawRectangleLinesEx(valuePlusButton, 2, valuePlusHovered ? Color{ 120, 240, 120, 255 } : Color{ 100, 220, 100, 255 });
-        DrawRectangleLinesEx(valueMinusButton, 2, valueMinusHovered ? Color{ 240, 120, 120, 255 } : Color{ 220, 100, 100, 255 });
-
-        DrawText("+", valuePlusButton.x + 15, valuePlusButton.y + 10, 20, WHITE);
-        DrawText("-", valueMinusButton.x + 15, valueMinusButton.y + 10, 20, WHITE);
-
-        // Index controls
-        bool indexPlusHovered = CheckCollisionPointRec(GetMousePosition(), indexPlusButton);
-        bool indexMinusHovered = CheckCollisionPointRec(GetMousePosition(), indexMinusButton);
-
-        DrawRectangleRec(indexPlusButton, indexPlusHovered ? Color{ 86, 156, 214, 255 } : Color{ 66, 136, 194, 255 });
-        DrawRectangleRec(indexMinusButton, indexMinusHovered ? Color{ 86, 156, 214, 255 } : Color{ 66, 136, 194, 255 });
-        DrawRectangleLinesEx(indexPlusButton, 2, indexPlusHovered ? Color{ 120, 180, 240, 255 } : Color{ 100, 160, 220, 255 });
-        DrawRectangleLinesEx(indexMinusButton, 2, indexMinusHovered ? Color{ 120, 180, 240, 255 } : Color{ 100, 160, 220, 255 });
-
-        DrawText("+", indexPlusButton.x + 15, indexPlusButton.y + 10, 20, WHITE);
-        DrawText("-", indexMinusButton.x + 15, indexMinusButton.y + 10, 20, WHITE);
-
-        // Set button
-        bool setButtonHovered = CheckCollisionPointRec(GetMousePosition(), setButton);
-        DrawRectangleRec(setButton, setButtonHovered ? Color{ 214, 156, 86, 255 } : Color{ 194, 136, 66, 255 });
-        DrawRectangleLinesEx(setButton, 2, setButtonHovered ? Color{ 240, 180, 120, 255 } : Color{ 220, 160, 100, 255 });
-
-        // Labels and text
-        DrawText("Value:", 220, 455, 20, Color{ 220, 220, 220, 255 });
-        DrawText("Index:", 220, 505, 20, Color{ 220, 220, 220, 255 });
-
-        DrawText(TextFormat("%d", currentValue), 400, 455, 20, WHITE);
-        DrawText(TextFormat("%d", selectedIndex), 400, 505, 20, WHITE);
-
-        DrawText("SET VALUE", setButton.x + 10, setButton.y + 12, 20, WHITE);
-
-        // Instructions
-        DrawText("Use +/- buttons to adjust value and index, then click SET VALUE", 150, 550, 18, Color{ 180, 180, 180, 255 });
-        DrawText("Colorful Array Visualizer", 250, 50, 30, Color{ 220, 220, 255, 255 });
+        // draw array
+        viz.Update(dt);
+        viz.Draw();
 
         EndDrawing();
     }

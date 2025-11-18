@@ -94,9 +94,32 @@ public:
 
     void Update(float dt)
     {
+        // Handle shrinking animation separately before general updates
+        if (runningMode == Mode::DELETE_SHRINKING) {
+            if (deleteShrinkingIndex >= 0 && deleteShrinkingIndex < (int)elements.size()) {
+                // Shrink the element
+                elements[deleteShrinkingIndex].scale -= dt * 3.0f;
+                elements[deleteShrinkingIndex].alpha -= dt * 3.0f;
+                if (elements[deleteShrinkingIndex].scale <= 0.0f) {
+                    // Remove the element and start shifting
+                    elements.erase(elements.begin() + deleteShrinkingIndex);
+                    // Start shifting from the element right after the deleted one
+                    if (deleteShrinkingIndex < (int)elements.size()) {
+                        deleteShiftingIndex = deleteShrinkingIndex;
+                        runningMode = Mode::DELETE_SHIFTING;
+                    } else {
+                        // Nothing to shift
+                        runningMode = Mode::IDLE;
+                        unlockUI();
+                    }
+                }
+            }
+        }
+        
         // move elements toward target positions
         bool anyMoving = false;
-        for (auto &e : elements) {
+        for (size_t i = 0; i < elements.size(); ++i) {
+            auto &e = elements[i];
             // interpolate position
             e.pos = Vector2Lerp(e.pos, e.target, std::min(1.0f, MOVE_SPEED * dt));
             // clamp small distances
@@ -108,8 +131,11 @@ public:
                 e.moving = false;
             }
             // simple interpolation for scale/alpha if needed (not heavy)
-            e.scale = Lerp(e.scale, 1.0f, std::min(1.0f, MOVE_SPEED * dt));
-            e.alpha = Lerp(e.alpha, 1.0f, std::min(1.0f, MOVE_SPEED * dt));
+            // Skip interpolation for element being deleted
+            if (runningMode != Mode::DELETE_SHRINKING || (int)i != deleteShrinkingIndex) {
+                e.scale = Lerp(e.scale, 1.0f, std::min(1.0f, MOVE_SPEED * dt));
+                e.alpha = Lerp(e.alpha, 1.0f, std::min(1.0f, MOVE_SPEED * dt));
+            }
         }
 
         // If an animation step was triggered (e.g., compare / swap), check if finished then progress
@@ -127,12 +153,28 @@ public:
                 // continue shifting or finalize insertion
                 ContinueShifting();
             }
-        } else if (runningMode == Mode::DELETING) {
+        } else if (runningMode == Mode::DELETE_SHRINKING) {
+            if (deleteShrinkingIndex >= 0 && deleteShrinkingIndex < (int)elements.size()) {
+                // Shrink the element
+                elements[deleteShrinkingIndex].scale -= dt * 3.0f;
+                elements[deleteShrinkingIndex].alpha -= dt * 3.0f;
+                if (elements[deleteShrinkingIndex].scale <= 0.0f) {
+                    // Remove the element and start shifting
+                    elements.erase(elements.begin() + deleteShrinkingIndex);
+                    // Start shifting from the element right after the deleted one
+                    if (deleteShrinkingIndex < (int)elements.size()) {
+                        deleteShiftingIndex = deleteShrinkingIndex;
+                        runningMode = Mode::DELETE_SHIFTING;
+                    } else {
+                        // Nothing to shift
+                        runningMode = Mode::IDLE;
+                        unlockUI();
+                    }
+                }
+            }
+        } else if (runningMode == Mode::DELETE_SHIFTING) {
             if (!AnyElementMoving()) {
-                // finalize deletion
-                finalizeDelete();
-                runningMode = Mode::IDLE;
-                unlockUI();
+                ContinueDeleteShifting();
             }
         } else if (runningMode == Mode::INSERTING) {
             if (!AnyElementMoving()) {
@@ -191,17 +233,12 @@ public:
     {
         if (running() || elements.empty()) return;
         if (index < 0 || index >= (int)elements.size()) return;
-        // animate deletion: scale down & fade out then remove & shift
-        // We'll mark one element to shrink and then in finalizeDelete we remove it and shift others
+        
         deletingIndex = index;
-        elements[index].scale = 1.0f;
+        deleteShrinkingIndex = index;
         elements[index].color = COL_SWAP;
-        // target unchanged; but animate scale to 0 and alpha to 0 over time by setting immediate targets via lambda inside Update.
-        // We'll use a simplistic approach: set scale target to 0 by manually decaying scale in Update loop while in DELETING state.
-        runningMode = Mode::DELETING;
+        runningMode = Mode::DELETE_SHRINKING;
         lockUI();
-
-        // set others' targets now to shift later (they will start shifting after we remove the element)
     }
 
     // Search for value (linear)
@@ -231,13 +268,15 @@ public:
     bool running() const { return runningMode != Mode::IDLE; }
 
 private:
-    enum class Mode { IDLE, INSERTING, SHIFTING, DELETING, SEARCHING, SORTING };
+    enum class Mode { IDLE, INSERTING, SHIFTING, DELETING, DELETE_SHRINKING, DELETE_SHIFTING, SEARCHING, SORTING };
     Mode runningMode = Mode::IDLE;
 
     std::vector<VElement> elements;
 
     // delete helpers
     int deletingIndex = -1;
+    int deleteShrinkingIndex = -1; // element being shrunk
+    int deleteShiftingIndex = -1;  // element being shifted left
 
     // search helpers
     int searchValue = 0;
@@ -427,6 +466,25 @@ private:
         
         // Move to the next element (going left)
         shiftingIndex--;
+    }
+
+    // Called each frame while DELETE_SHIFTING to shift elements one at a time
+    void ContinueDeleteShifting()
+    {
+        // If we've shifted all elements after the deleted index
+        if (deleteShiftingIndex >= (int)elements.size()) {
+            runningMode = Mode::IDLE;
+            unlockUI();
+            return;
+        }
+        
+        // Shift the current element to the left
+        elements[deleteShiftingIndex].color = COL_ACTIVE;
+        Vector2 newTarget = indexToPos(deleteShiftingIndex);
+        elements[deleteShiftingIndex].target = newTarget;
+        
+        // Move to the next element (going right)
+        deleteShiftingIndex++;
     }
 
     // finalize delete after shrink animation completed

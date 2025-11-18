@@ -55,8 +55,10 @@ struct Button {
         DrawRectangleLinesEx(rect, 2.0f, COL_BORDER);
         int fontSize = 18;
         int textW = MeasureText(label.c_str(), fontSize);
+        // Use light text color when not hovering, dark when hovering
+        Color textColor = (enabled && hover) ? BLACK : LIGHTGRAY;
         DrawText(label.c_str(), (int)(rect.x + rect.width * 0.5f - textW * 0.5f),
-                 (int)(rect.y + rect.height * 0.5f - fontSize * 0.5f), fontSize, BLACK);
+                 (int)(rect.y + rect.height * 0.5f - fontSize * 0.5f), fontSize, textColor);
 
         return pressed;
     }

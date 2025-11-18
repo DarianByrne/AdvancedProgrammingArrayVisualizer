@@ -124,9 +124,8 @@ public:
             }
         } else if (runningMode == Mode::SHIFTING) {
             if (!AnyElementMoving()) {
-                // shifting finished
-                runningMode = Mode::IDLE;
-                unlockUI();
+                // continue shifting or finalize insertion
+                ContinueShifting();
             }
         } else if (runningMode == Mode::DELETING) {
             if (!AnyElementMoving()) {
@@ -164,19 +163,26 @@ public:
     {
         if (running()) return; // ignore while animating
         index = std::clamp(index, 0, (int)elements.size());
-        // create new element at target index but start slightly above for animation
-        Vector2 newPos = indexToPos(index);
-        Vector2 startPos = { newPos.x, newPos.y - 120.0f };
-        VElement ve(value, startPos);
-        ve.target = newPos;
-        ve.scale = 0.7f;
-        ve.color = COL_TARGET;
-
-        elements.insert(elements.begin() + index, ve);
-        // shift targets of elements after inserted index
-        updateTargets();
-        // set mode so Update continues and unlock UI only when finished
-        runningMode = Mode::INSERTING;
+        
+        insertionTargetIndex = index;
+        insertionValue = value;
+        
+        // If inserting at the end, no shifting needed
+        if (index >= (int)elements.size()) {
+            Vector2 newPos = indexToPos(index);
+            Vector2 startPos = { newPos.x, newPos.y - 120.0f };
+            VElement ve(value, startPos);
+            ve.target = newPos;
+            ve.scale = 0.7f;
+            ve.color = COL_TARGET;
+            elements.push_back(ve);
+            runningMode = Mode::INSERTING;
+        } else {
+            // Start shifting from the last element
+            shiftingIndex = (int)elements.size() - 1;
+            runningMode = Mode::SHIFTING;
+        }
+        
         lockUI();
     }
 
@@ -240,6 +246,11 @@ private:
     // sort helpers (bubble)
     int sortI = 0;
     int sortJ = 0;
+
+    // insertion helpers
+    int insertionTargetIndex = -1;
+    int insertionValue = 0;
+    int shiftingIndex = -1; // tracks which element is currently being shifted
 
     // UI lock callback (simple flags; UI code checks these)
     bool uiLocked = false;
@@ -389,6 +400,33 @@ private:
 
         // advance j
         sortJ++;
+    }
+
+    // Called each frame while SHIFTING to shift elements one at a time
+    void ContinueShifting()
+    {
+        // If we've shifted all elements down to the target index, insert the new element
+        if (shiftingIndex < insertionTargetIndex) {
+            // Insert the new element
+            Vector2 newPos = indexToPos(insertionTargetIndex);
+            Vector2 startPos = { newPos.x, newPos.y - 120.0f };
+            VElement ve(insertionValue, startPos);
+            ve.target = newPos;
+            ve.scale = 0.7f;
+            ve.color = COL_TARGET;
+            elements.insert(elements.begin() + insertionTargetIndex, ve);
+            
+            runningMode = Mode::INSERTING;
+            return;
+        }
+        
+        // Shift the current element to the right
+        elements[shiftingIndex].color = COL_ACTIVE;
+        Vector2 newTarget = indexToPos(shiftingIndex + 1);
+        elements[shiftingIndex].target = newTarget;
+        
+        // Move to the next element (going left)
+        shiftingIndex--;
     }
 
     // finalize delete after shrink animation completed

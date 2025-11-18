@@ -187,6 +187,21 @@ public:
 
     // UI-level getters
     size_t size() const { return elements.size(); }
+    
+    // Get bounds of the array for camera zoom
+    Rectangle GetArrayBounds() const
+    {
+        if (elements.empty()) {
+            return { ARRAY_START_X, ARRAY_Y - BOX_H, BOX_W, BOX_H * 2 };
+        }
+        
+        float minX = ARRAY_START_X;
+        float maxX = ARRAY_START_X + (elements.size() - 1) * (BOX_W + BOX_SPACING) + BOX_W;
+        float minY = ARRAY_Y - BOX_H;
+        float maxY = ARRAY_Y + BOX_H * 2;
+        
+        return { minX, minY, maxX - minX, maxY - minY };
+    }
 
     // Add initial elements
     void InitWith(const std::vector<int>& vals)
@@ -596,6 +611,15 @@ int main()
     std::vector<int> initial = {10, 4, 7, 2, 9, 11};
     viz.InitWith(initial);
 
+    // Camera setup
+    Camera2D camera = { 0 };
+    camera.target = { SCREEN_W / 2.0f, (SCREEN_H - UI_PANEL_H) / 2.0f };
+    camera.offset = { SCREEN_W / 2.0f, (SCREEN_H - UI_PANEL_H) / 2.0f + UI_PANEL_H };
+    camera.rotation = 0.0f;
+    camera.zoom = 1.0f;
+    
+    float targetZoom = 1.0f;
+
     // UI elements
     Button btnInsert{ {880, 20, 180, 36}, "Insert" };
     Button btnDelete{ {880, 20 + 44, 180, 36}, "Delete" };
@@ -610,6 +634,27 @@ int main()
     while (!WindowShouldClose())
     {
         float dt = GetFrameTime();
+
+        // Calculate camera zoom to fit array
+        Rectangle arrayBounds = viz.GetArrayBounds();
+        float availableWidth = SCREEN_W - 100.0f; // padding
+        float availableHeight = (SCREEN_H - UI_PANEL_H) - 100.0f; // padding
+        
+        float zoomX = availableWidth / arrayBounds.width;
+        float zoomY = availableHeight / arrayBounds.height;
+        targetZoom = std::min(zoomX, zoomY);
+        targetZoom = std::clamp(targetZoom, 0.1f, 1.5f); // limit zoom range
+        
+        // Smooth zoom interpolation
+        camera.zoom += (targetZoom - camera.zoom) * 5.0f * dt;
+        
+        // Update camera target to center of array
+        Vector2 arrayCenter = {
+            arrayBounds.x + arrayBounds.width * 0.5f,
+            arrayBounds.y + arrayBounds.height * 0.5f
+        };
+        camera.target.x += (arrayCenter.x - camera.target.x) * 5.0f * dt;
+        camera.target.y += (arrayCenter.y - camera.target.y) * 5.0f * dt;
 
         // Handle inputs
         inputValue.HandleInput();
@@ -681,9 +726,12 @@ int main()
         // draw info
         DrawText(infoMsg.c_str(), 16, 14, 18, LIGHTGRAY);
 
-        // draw array
+        // draw array with camera
         viz.Update(dt);
+        
+        BeginMode2D(camera);
         viz.Draw();
+        EndMode2D();
 
         EndDrawing();
     }

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 4.0)
 project(AdvancedProgrammingStarterProject)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 
 include_directories(build/external/raylib-master/examples/core)
 include_directories(build/external/raylib-master/examples/models)

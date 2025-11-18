@@ -281,6 +281,11 @@ public:
 
     // Small helper: returns whether animator is running
     bool running() const { return runningMode != Mode::IDLE; }
+    
+    // Set callback for when search completes
+    void SetOnSearchComplete(std::function<void(int, int)> callback) {
+        onSearchComplete = callback;
+    }
 
 private:
     enum class Mode { IDLE, INSERTING, SHIFTING, DELETING, DELETE_SHRINKING, DELETE_SHIFTING, SEARCHING, SORTING };
@@ -296,6 +301,8 @@ private:
     // search helpers
     int searchValue = 0;
     int searchIndex = 0;
+    int searchResultIndex = -1; // -1 = not found, >= 0 = found at index
+    std::function<void(int, int)> onSearchComplete; // callback(value, resultIndex)
 
     // sort helpers (bubble)
     int sortI = 0;
@@ -365,8 +372,9 @@ private:
     {
         // if searchIndex >= size -> not found
         if (searchIndex >= (int)elements.size()) {
-            // search finished
-            // maybe flash "not found" by coloring none; here we just unlock UI
+            // search finished - not found
+            searchResultIndex = -1;
+            if (onSearchComplete) onSearchComplete(searchValue, -1);
             runningMode = Mode::IDLE;
             unlockUI();
             return;
@@ -379,6 +387,8 @@ private:
         // if equal -> highlight target and stop
         if (elements[searchIndex].value == searchValue) {
             elements[searchIndex].color = COL_TARGET;
+            searchResultIndex = searchIndex;
+            if (onSearchComplete) onSearchComplete(searchValue, searchIndex);
             runningMode = Mode::IDLE;
             unlockUI();
             return;
@@ -630,6 +640,15 @@ int main()
     IntTextInput inputIndex({700, 20 + 44, 160, 36}, "index");
 
     std::string infoMsg = "Click an operation. UI locked while animations run.";
+    
+    // Setup callback for search completion
+    viz.SetOnSearchComplete([&infoMsg](int value, int resultIndex) {
+        if (resultIndex >= 0) {
+            infoMsg = "Searching for " + std::to_string(value) + "... found at index " + std::to_string(resultIndex) + "!";
+        } else {
+            infoMsg = "Searching for " + std::to_string(value) + "... not found.";
+        }
+    });
 
     while (!WindowShouldClose())
     {

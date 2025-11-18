@@ -178,7 +178,7 @@ public:
             }
         } else if (runningMode == Mode::INSERTING) {
             if (!AnyElementMoving()) {
-                // insertion finished (element placed)
+                // insertion finished (element placed) - keep it highlighted
                 runningMode = Mode::IDLE;
                 unlockUI();
             }
@@ -221,6 +221,7 @@ public:
         if (running()) return; // ignore while animating
         index = std::clamp(index, 0, (int)elements.size());
         
+        resetColors(); // Reset all colors before starting
         insertionTargetIndex = index;
         insertionValue = value;
         
@@ -249,6 +250,7 @@ public:
         if (running() || elements.empty()) return;
         if (index < 0 || index >= (int)elements.size()) return;
         
+        resetColors(); // Reset all colors before starting
         deletingIndex = index;
         deleteShrinkingIndex = index;
         elements[index].color = COL_SWAP;
@@ -472,6 +474,7 @@ private:
         // If we've shifted all elements down to the target index, insert the new element
         if (shiftingIndex < insertionTargetIndex) {
             // Insert the new element
+            resetColors();
             Vector2 newPos = indexToPos(insertionTargetIndex);
             Vector2 startPos = { newPos.x, newPos.y - 120.0f };
             VElement ve(insertionValue, startPos);
@@ -484,7 +487,8 @@ private:
             return;
         }
         
-        // Shift the current element to the right
+        // Reset colors and highlight only current element
+        resetColors();
         elements[shiftingIndex].color = COL_ACTIVE;
         Vector2 newTarget = indexToPos(shiftingIndex + 1);
         elements[shiftingIndex].target = newTarget;
@@ -498,12 +502,14 @@ private:
     {
         // If we've shifted all elements after the deleted index
         if (deleteShiftingIndex >= (int)elements.size()) {
+            resetColors();
             runningMode = Mode::IDLE;
             unlockUI();
             return;
         }
         
-        // Shift the current element to the left
+        // Reset colors and highlight only current element
+        resetColors();
         elements[deleteShiftingIndex].color = COL_ACTIVE;
         Vector2 newTarget = indexToPos(deleteShiftingIndex);
         elements[deleteShiftingIndex].target = newTarget;

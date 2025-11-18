@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/AdvancedProgrammingStarterProject.iml" filepath="$PROJECT_DIR$/.idea/AdvancedProgrammingStarterProject.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/AdvancedProgrammingArrayVisualizer.iml" filepath="$PROJECT_DIR$/.idea/AdvancedProgrammingArrayVisualizer.iml" />
     </modules>
   </component>
 </project>

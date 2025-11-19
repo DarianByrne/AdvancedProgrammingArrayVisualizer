@@ -24,6 +24,7 @@ static const float BOX_SPACING = 16.0f;
 static const float ARRAY_START_X = 50.0f;
 static const float ARRAY_Y = (SCREEN_H - UI_PANEL_H) / 2.0f - BOX_H * 0.5f;
 
+static const int MAX_ARRAY_SIZE = 20;
 static const float MOVE_SPEED = 6.0f; // higher -> faster interpolation
 static const Color BACKGROUND = {22, 28, 35, 255};
 
@@ -80,17 +81,16 @@ struct VElement {
 // ---------- ArrayVisualizer ----------
 class ArrayVisualizer {
 public:
-    ArrayVisualizer()
+    ArrayVisualizer() : currentSize(0)
     {
-        elements.reserve(64);
     }
 
     void Draw()
     {
-        // draw elements
-        for (size_t i = 0; i < elements.size(); ++i) {
+        // draw elements (only the active ones)
+        for (int i = 0; i < currentSize; ++i) {
             const VElement &e = elements[i];
-            DrawElement(e, (int)i);
+            DrawElement(e, i);
         }
     }
 
@@ -98,15 +98,18 @@ public:
     {
         // Handle shrinking animation separately before general updates
         if (runningMode == Mode::DELETE_SHRINKING) {
-            if (deleteShrinkingIndex >= 0 && deleteShrinkingIndex < (int)elements.size()) {
+            if (deleteShrinkingIndex >= 0 && deleteShrinkingIndex < currentSize) {
                 // Shrink the element
                 elements[deleteShrinkingIndex].scale -= dt * 3.0f;
                 elements[deleteShrinkingIndex].alpha -= dt * 3.0f;
                 if (elements[deleteShrinkingIndex].scale <= 0.0f) {
-                    // Remove the element and start shifting
-                    elements.erase(elements.begin() + deleteShrinkingIndex);
+                    // Remove the element by shifting everything left
+                    for (int i = deleteShrinkingIndex; i < currentSize - 1; ++i) {
+                        elements[i] = elements[i + 1];
+                    }
+                    currentSize--;
                     // Start shifting from the element right after the deleted one
-                    if (deleteShrinkingIndex < (int)elements.size()) {
+                    if (deleteShrinkingIndex < currentSize) {
                         deleteShiftingIndex = deleteShrinkingIndex;
                         runningMode = Mode::DELETE_SHIFTING;
                     } else {
@@ -120,7 +123,7 @@ public:
         
         // move elements toward target positions
         bool anyMoving = false;
-        for (size_t i = 0; i < elements.size(); ++i) {
+        for (int i = 0; i < currentSize; ++i) {
             auto &e = elements[i];
             // interpolate position
             e.pos = Vector2Lerp(e.pos, e.target, std::min(1.0f, MOVE_SPEED * dt));
@@ -155,25 +158,6 @@ public:
                 // continue shifting or finalize insertion
                 ContinueShifting();
             }
-        } else if (runningMode == Mode::DELETE_SHRINKING) {
-            if (deleteShrinkingIndex >= 0 && deleteShrinkingIndex < (int)elements.size()) {
-                // Shrink the element
-                elements[deleteShrinkingIndex].scale -= dt * 3.0f;
-                elements[deleteShrinkingIndex].alpha -= dt * 3.0f;
-                if (elements[deleteShrinkingIndex].scale <= 0.0f) {
-                    // Remove the element and start shifting
-                    elements.erase(elements.begin() + deleteShrinkingIndex);
-                    // Start shifting from the element right after the deleted one
-                    if (deleteShrinkingIndex < (int)elements.size()) {
-                        deleteShiftingIndex = deleteShrinkingIndex;
-                        runningMode = Mode::DELETE_SHIFTING;
-                    } else {
-                        // Nothing to shift
-                        runningMode = Mode::IDLE;
-                        unlockUI();
-                    }
-                }
-            }
         } else if (runningMode == Mode::DELETE_SHIFTING) {
             if (!AnyElementMoving()) {
                 ContinueDeleteShifting();
@@ -188,17 +172,15 @@ public:
     }
 
     // UI-level getters
-    size_t size() const { return elements.size(); }
+    int size() const { return currentSize; }
+    int capacity() const { return MAX_ARRAY_SIZE; }
+    bool isFull() const { return currentSize >= MAX_ARRAY_SIZE; }
     
-    // Get bounds of the array for camera zoom
+    // Get bounds of the array for camera zoom (fixed size for all array slots)
     Rectangle GetArrayBounds() const
     {
-        if (elements.empty()) {
-            return { ARRAY_START_X, ARRAY_Y - BOX_H, BOX_W, BOX_H * 2 };
-        }
-        
         float minX = ARRAY_START_X;
-        float maxX = ARRAY_START_X + (elements.size() - 1) * (BOX_W + BOX_SPACING) + BOX_W;
+        float maxX = ARRAY_START_X + (MAX_ARRAY_SIZE - 1) * (BOX_W + BOX_SPACING) + BOX_W;
         float minY = ARRAY_Y - BOX_H;
         float maxY = ARRAY_Y + BOX_H * 2;
         
@@ -208,11 +190,11 @@ public:
     // Add initial elements
     void InitWith(const std::vector<int>& vals)
     {
-        elements.clear();
-        for (size_t i = 0; i < vals.size(); ++i) {
-            Vector2 p = indexToPos((int)i);
+        currentSize = std::min((int)vals.size(), MAX_ARRAY_SIZE);
+        for (int i = 0; i < currentSize; ++i) {
+            Vector2 p = indexToPos(i);
             VElement v(vals[i], p);
-            elements.push_back(v);
+            elements[i] = v;
         }
         updateTargets();
     }
@@ -221,25 +203,28 @@ public:
     void RequestInsert(int value, int index)
     {
         if (running()) return; // ignore while animating
-        index = std::clamp(index, 0, (int)elements.size());
+        if (currentSize >= MAX_ARRAY_SIZE) return; // array is full
+        
+        index = std::clamp(index, 0, currentSize);
         
         resetColors(); // Reset all colors before starting
         insertionTargetIndex = index;
         insertionValue = value;
         
         // If inserting at the end, no shifting needed
-        if (index >= (int)elements.size()) {
+        if (index >= currentSize) {
             Vector2 newPos = indexToPos(index);
             Vector2 startPos = { newPos.x, newPos.y - 120.0f };
             VElement ve(value, startPos);
             ve.target = newPos;
             ve.scale = 0.7f;
             ve.color = COL_TARGET;
-            elements.push_back(ve);
+            elements[currentSize] = ve;
+            currentSize++;
             runningMode = Mode::INSERTING;
         } else {
             // Start shifting from the last element
-            shiftingIndex = (int)elements.size() - 1;
+            shiftingIndex = currentSize - 1;
             runningMode = Mode::SHIFTING;
         }
         
@@ -249,8 +234,8 @@ public:
     // Delete by index
     void RequestDeleteAt(int index)
     {
-        if (running() || elements.empty()) return;
-        if (index < 0 || index >= (int)elements.size()) return;
+        if (running() || currentSize == 0) return;
+        if (index < 0 || index >= currentSize) return;
         
         resetColors(); // Reset all colors before starting
         deletingIndex = index;
@@ -264,6 +249,7 @@ public:
     void RequestSearchValue(int value)
     {
         if (running()) return;
+        if (currentSize == 0) return;
         searchValue = value;
         searchIndex = 0;
         // reset colors
@@ -276,6 +262,7 @@ public:
     void RequestSort()
     {
         if (running()) return;
+        if (currentSize < 2) return;
         runningMode = Mode::SORTING;
         sortI = 0;
         sortJ = 0;
@@ -295,7 +282,8 @@ private:
     enum class Mode { IDLE, INSERTING, SHIFTING, DELETING, DELETE_SHRINKING, DELETE_SHIFTING, SEARCHING, SORTING };
     Mode runningMode = Mode::IDLE;
 
-    std::vector<VElement> elements;
+    VElement elements[MAX_ARRAY_SIZE];
+    int currentSize;
 
     // delete helpers
     int deletingIndex = -1;
@@ -328,8 +316,8 @@ private:
     // Update target positions based on current element order
     void updateTargets()
     {
-        for (size_t i = 0; i < elements.size(); ++i) {
-            elements[i].target = indexToPos((int)i);
+        for (int i = 0; i < currentSize; ++i) {
+            elements[i].target = indexToPos(i);
         }
     }
 
@@ -362,20 +350,24 @@ private:
 
     bool AnyElementMoving() const
     {
-        for (const auto &e : elements) if (e.moving) return true;
+        for (int i = 0; i < currentSize; ++i) {
+            if (elements[i].moving) return true;
+        }
         return false;
     }
 
     void resetColors()
     {
-        for (auto &e : elements) e.color = COL_BOX;
+        for (int i = 0; i < currentSize; ++i) {
+            elements[i].color = COL_BOX;
+        }
     }
 
     // Called each frame while SEARCHING and not moving to step to next index
     void ContinueSearch()
     {
         // if searchIndex >= size -> not found
-        if (searchIndex >= (int)elements.size()) {
+        if (searchIndex >= currentSize) {
             // search finished - not found
             searchResultIndex = -1;
             if (onSearchComplete) onSearchComplete(searchValue, -1);
@@ -411,7 +403,7 @@ private:
     // Called each frame while SORTING and not moving to perform next compare/swap step
     void ContinueSort()
     {
-        int n = (int)elements.size();
+        int n = currentSize;
         if (n < 2) {
             runningMode = Mode::IDLE;
             unlockUI();
@@ -475,15 +467,18 @@ private:
     {
         // If we've shifted all elements down to the target index, insert the new element
         if (shiftingIndex < insertionTargetIndex) {
-            // Insert the new element
+            // Insert the new element by shifting array manually
             resetColors();
+            // Shift elements right to make space (already done in animation)
+            // Now just place the new element
             Vector2 newPos = indexToPos(insertionTargetIndex);
             Vector2 startPos = { newPos.x, newPos.y - 120.0f };
             VElement ve(insertionValue, startPos);
             ve.target = newPos;
             ve.scale = 0.7f;
             ve.color = COL_TARGET;
-            elements.insert(elements.begin() + insertionTargetIndex, ve);
+            elements[insertionTargetIndex] = ve;
+            currentSize++;
             
             runningMode = Mode::INSERTING;
             return;
@@ -503,7 +498,7 @@ private:
     void ContinueDeleteShifting()
     {
         // If we've shifted all elements after the deleted index
-        if (deleteShiftingIndex >= (int)elements.size()) {
+        if (deleteShiftingIndex >= currentSize) {
             resetColors();
             runningMode = Mode::IDLE;
             unlockUI();
@@ -520,20 +515,7 @@ private:
         deleteShiftingIndex++;
     }
 
-    // finalize delete after shrink animation completed
-    void finalizeDelete()
-    {
-        if (deletingIndex < 0 || deletingIndex >= (int)elements.size()) {
-            deletingIndex = -1;
-            return;
-        }
 
-        // remove element
-        elements.erase(elements.begin() + deletingIndex);
-        deletingIndex = -1;
-        // update targets of remaining elements
-        updateTargets();
-    }
 
     // Linear interpolation helper
     static float Lerp(float a, float b, float t) { return a + (b - a) * t; }
@@ -629,14 +611,23 @@ int main()
     std::vector<int> initial = {10, 4, 7, 2, 9, 11};
     viz.InitWith(initial);
 
-    // Camera setup
+    // Camera setup - fixed zoom to fit MAX_ARRAY_SIZE
+    Rectangle arrayBounds = viz.GetArrayBounds();
+    float availableWidth = SCREEN_W - 100.0f;
+    float availableHeight = (SCREEN_H - UI_PANEL_H) - 100.0f;
+    float zoomX = availableWidth / arrayBounds.width;
+    float zoomY = availableHeight / arrayBounds.height;
+    float fixedZoom = std::min(zoomX, zoomY);
+    
     Camera2D camera = { 0 };
-    camera.target = { SCREEN_W / 2.0f, (SCREEN_H - UI_PANEL_H) / 2.0f };
+    Vector2 arrayCenter = {
+        arrayBounds.x + arrayBounds.width * 0.5f,
+        arrayBounds.y + arrayBounds.height * 0.5f
+    };
+    camera.target = arrayCenter;
     camera.offset = { SCREEN_W / 2.0f, (SCREEN_H - UI_PANEL_H) / 2.0f + UI_PANEL_H };
     camera.rotation = 0.0f;
-    camera.zoom = 1.0f;
-    
-    float targetZoom = 1.0f;
+    camera.zoom = fixedZoom;
 
     // UI elements
     Button btnInsert{ {880, 20, 180, 36}, "Insert" };
@@ -661,27 +652,6 @@ int main()
     while (!WindowShouldClose())
     {
         float dt = GetFrameTime();
-
-        // Calculate camera zoom to fit array
-        Rectangle arrayBounds = viz.GetArrayBounds();
-        float availableWidth = SCREEN_W - 100.0f; // padding
-        float availableHeight = (SCREEN_H - UI_PANEL_H) - 100.0f; // padding
-        
-        float zoomX = availableWidth / arrayBounds.width;
-        float zoomY = availableHeight / arrayBounds.height;
-        targetZoom = std::min(zoomX, zoomY);
-        targetZoom = std::clamp(targetZoom, 0.1f, 1.5f); // limit zoom range
-        
-        // Smooth zoom interpolation
-        camera.zoom += (targetZoom - camera.zoom) * 5.0f * dt;
-        
-        // Update camera target to center of array
-        Vector2 arrayCenter = {
-            arrayBounds.x + arrayBounds.width * 0.5f,
-            arrayBounds.y + arrayBounds.height * 0.5f
-        };
-        camera.target.x += (arrayCenter.x - camera.target.x) * 5.0f * dt;
-        camera.target.y += (arrayCenter.y - camera.target.y) * 5.0f * dt;
 
         // Handle inputs
         inputValue.HandleInput();
@@ -712,9 +682,11 @@ int main()
             auto iOpt = inputIndex.GetValue();
             if (!vOpt.has_value()) {
                 infoMsg = "Provide integer value to insert.";
+            } else if (viz.isFull()) {
+                infoMsg = "Array is full! Cannot insert (max size: " + std::to_string(MAX_ARRAY_SIZE) + ")";
             } else {
                 int val = vOpt.value();
-                int idx = iOpt.has_value() ? iOpt.value() : (int)viz.size(); // default append
+                int idx = iOpt.has_value() ? iOpt.value() : viz.size(); // default append
                 viz.RequestInsert(val, idx);
                 infoMsg = "Inserting " + std::to_string(val) + " at index " + std::to_string(idx) + "...";
                 // optionally clear input

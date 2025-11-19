@@ -87,10 +87,14 @@ public:
 
     void Draw()
     {
-        // draw elements (only the active ones)
-        for (int i = 0; i < currentSize; ++i) {
-            const VElement &e = elements[i];
-            DrawElement(e, i);
+        // draw all array slots (empty and filled)
+        for (int i = 0; i < MAX_ARRAY_SIZE; ++i) {
+            if (i < currentSize) {
+                const VElement &e = elements[i];
+                DrawElement(e, i);
+            } else {
+                DrawEmptySlot(i);
+            }
         }
     }
 
@@ -346,6 +350,17 @@ private:
         int tw = MeasureText(s.c_str(), fs);
         DrawText(s.c_str(), (int)(r.x + r.width * 0.5f - tw * 0.5f),
                  (int)(r.y + r.height * 0.5f - fs * 0.5f), fs, COL_TEXT);
+    }
+
+    void DrawEmptySlot(int idx) const
+    {
+        Vector2 pos = indexToPos(idx);
+        Rectangle r = { pos.x, pos.y, BOX_W, BOX_H };
+        
+        // Draw empty slot with darker color
+        Color emptyColor = Fade(COL_BOX, 0.3f);
+        DrawRectangleRounded(r, 0.12f, 6, emptyColor);
+        DrawRectangleRoundedLinesEx(r, 0.12f, 6, 2.0f, Fade(COL_BORDER, 0.5f));
     }
 
     bool AnyElementMoving() const

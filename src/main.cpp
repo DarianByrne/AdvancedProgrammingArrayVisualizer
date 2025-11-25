@@ -18,11 +18,12 @@ static const int SCREEN_W = 1100;
 static const int SCREEN_H = 650;
 
 static const int UI_PANEL_H = 100;
+static const int ALGORITHM_PANEL_H = 200; // Space for algorithm display
 static const float BOX_W = 72.0f;
 static const float BOX_H = 72.0f;
 static const float BOX_SPACING = 16.0f;
 static const float ARRAY_START_X = 50.0f;
-static const float ARRAY_Y = (SCREEN_H - UI_PANEL_H) / 2.0f - BOX_H * 0.5f;
+static const float ARRAY_Y = UI_PANEL_H + 80.0f; // Position array below UI panel
 
 static const int MAX_ARRAY_SIZE = 20;
 static const float MOVE_SPEED = 6.0f; // higher -> faster interpolation
@@ -185,8 +186,8 @@ public:
     {
         float minX = ARRAY_START_X;
         float maxX = ARRAY_START_X + (MAX_ARRAY_SIZE - 1) * (BOX_W + BOX_SPACING) + BOX_W;
-        float minY = ARRAY_Y - BOX_H;
-        float maxY = ARRAY_Y + BOX_H * 2;
+        float minY = ARRAY_Y - BOX_H * 0.5f;
+        float maxY = ARRAY_Y + BOX_H * 1.5f;
         
         return { minX, minY, maxX - minX, maxY - minY };
     }
@@ -629,7 +630,7 @@ int main()
     // Camera setup - fixed zoom to fit MAX_ARRAY_SIZE
     Rectangle arrayBounds = viz.GetArrayBounds();
     float availableWidth = SCREEN_W - 100.0f;
-    float availableHeight = (SCREEN_H - UI_PANEL_H) - 100.0f;
+    float availableHeight = (SCREEN_H - UI_PANEL_H - ALGORITHM_PANEL_H) - 60.0f;
     float zoomX = availableWidth / arrayBounds.width;
     float zoomY = availableHeight / arrayBounds.height;
     float fixedZoom = std::min(zoomX, zoomY);
@@ -640,7 +641,7 @@ int main()
         arrayBounds.y + arrayBounds.height * 0.5f
     };
     camera.target = arrayCenter;
-    camera.offset = { SCREEN_W / 2.0f, (SCREEN_H - UI_PANEL_H) / 2.0f + UI_PANEL_H };
+    camera.offset = { SCREEN_W / 2.0f, UI_PANEL_H + (SCREEN_H - UI_PANEL_H - ALGORITHM_PANEL_H) / 2.0f };
     camera.rotation = 0.0f;
     camera.zoom = fixedZoom;
 
@@ -746,6 +747,22 @@ int main()
         BeginMode2D(camera);
         viz.Draw();
         EndMode2D();
+        
+        // Draw algorithm panel background
+        int algorithmPanelY = SCREEN_H - ALGORITHM_PANEL_H;
+        DrawRectangle(0, algorithmPanelY, SCREEN_W, ALGORITHM_PANEL_H, Fade(RAYWHITE, 0.03f));
+        DrawLine(0, algorithmPanelY, SCREEN_W, algorithmPanelY, Fade(COL_BORDER, 0.6f));
+        
+        // Draw algorithm title
+        DrawText("Algorithm:", 20, algorithmPanelY + 10, 20, LIGHTGRAY);
+        
+        // Draw insert algorithm pseudocode
+        int algorithmTextY = algorithmPanelY + 40;
+        DrawText("Insert(value, index):", 30, algorithmTextY, 18, WHITE);
+        DrawText("  1. for i = size-1 down to index:", 30, algorithmTextY + 25, 16, LIGHTGRAY);
+        DrawText("  2.     arr[i+1] = arr[i]  // shift right", 30, algorithmTextY + 45, 16, LIGHTGRAY);
+        DrawText("  3. arr[index] = value     // insert new", 30, algorithmTextY + 65, 16, LIGHTGRAY);
+        DrawText("  4. size++", 30, algorithmTextY + 85, 16, LIGHTGRAY);
 
         EndDrawing();
     }

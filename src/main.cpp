@@ -213,6 +213,7 @@ public:
         index = std::clamp(index, 0, currentSize);
         
         resetColors(); // Reset all colors before starting
+        lastOperation = "INSERT";
         insertionTargetIndex = index;
         insertionValue = value;
         
@@ -243,6 +244,7 @@ public:
         if (index < 0 || index >= currentSize) return;
         
         resetColors(); // Reset all colors before starting
+        lastOperation = "DELETE";
         deletingIndex = index;
         deleteShrinkingIndex = index;
         elements[index].color = COL_SWAP;
@@ -255,6 +257,7 @@ public:
     {
         if (running()) return;
         if (currentSize == 0) return;
+        lastOperation = "SEARCH";
         searchValue = value;
         searchIndex = 0;
         // reset colors
@@ -268,6 +271,7 @@ public:
     {
         if (running()) return;
         if (currentSize < 2) return;
+        lastOperation = "SORT";
         runningMode = Mode::SORTING;
         sortI = 0;
         sortJ = 0;
@@ -282,6 +286,20 @@ public:
     void SetOnSearchComplete(std::function<void(int, int)> callback) {
         onSearchComplete = callback;
     }
+    
+    // Get current algorithm type for display
+    std::string GetCurrentAlgorithm() const {
+        if (runningMode == Mode::INSERTING || runningMode == Mode::SHIFTING) {
+            return "INSERT";
+        } else if (runningMode == Mode::DELETE_SHRINKING || runningMode == Mode::DELETE_SHIFTING) {
+            return "DELETE";
+        } else if (runningMode == Mode::SEARCHING) {
+            return "SEARCH";
+        } else if (runningMode == Mode::SORTING) {
+            return "SORT";
+        }
+        return lastOperation; // show last operation when idle
+    }
 
 private:
     enum class Mode { IDLE, INSERTING, SHIFTING, DELETING, DELETE_SHRINKING, DELETE_SHIFTING, SEARCHING, SORTING };
@@ -289,6 +307,7 @@ private:
 
     VElement elements[MAX_ARRAY_SIZE];
     int currentSize;
+    std::string lastOperation = "INSERT"; // Track last operation for algorithm display
 
     // delete helpers
     int deletingIndex = -1;
@@ -756,13 +775,34 @@ int main()
         // Draw algorithm title
         DrawText("Algorithm:", 20, algorithmPanelY + 10, 20, LIGHTGRAY);
         
-        // Draw insert algorithm pseudocode
+        // Draw algorithm pseudocode based on current operation
         int algorithmTextY = algorithmPanelY + 40;
-        DrawText("Insert(value, index):", 30, algorithmTextY, 18, WHITE);
-        DrawText("  1. for i = size-1 down to index:", 30, algorithmTextY + 25, 16, LIGHTGRAY);
-        DrawText("  2.     arr[i+1] = arr[i]  // shift right", 30, algorithmTextY + 45, 16, LIGHTGRAY);
-        DrawText("  3. arr[index] = value     // insert new", 30, algorithmTextY + 65, 16, LIGHTGRAY);
-        DrawText("  4. size++", 30, algorithmTextY + 85, 16, LIGHTGRAY);
+        std::string currentAlgo = viz.GetCurrentAlgorithm();
+        
+        if (currentAlgo == "INSERT") {
+            DrawText("Insert(value, index):", 30, algorithmTextY, 18, WHITE);
+            DrawText("  1. for i = size-1 down to index:", 30, algorithmTextY + 25, 16, LIGHTGRAY);
+            DrawText("  2.     arr[i+1] = arr[i]  // shift right", 30, algorithmTextY + 45, 16, LIGHTGRAY);
+            DrawText("  3. arr[index] = value     // insert new", 30, algorithmTextY + 65, 16, LIGHTGRAY);
+            DrawText("  4. size++", 30, algorithmTextY + 85, 16, LIGHTGRAY);
+        } else if (currentAlgo == "DELETE") {
+            DrawText("Delete(index):", 30, algorithmTextY, 18, WHITE);
+            DrawText("  1. for i = index to size-2:", 30, algorithmTextY + 25, 16, LIGHTGRAY);
+            DrawText("  2.     arr[i] = arr[i+1]  // shift left", 30, algorithmTextY + 45, 16, LIGHTGRAY);
+            DrawText("  3. size--", 30, algorithmTextY + 65, 16, LIGHTGRAY);
+        } else if (currentAlgo == "SEARCH") {
+            DrawText("LinearSearch(value):", 30, algorithmTextY, 18, WHITE);
+            DrawText("  1. for i = 0 to size-1:", 30, algorithmTextY + 25, 16, LIGHTGRAY);
+            DrawText("  2.     if arr[i] == value:", 30, algorithmTextY + 45, 16, LIGHTGRAY);
+            DrawText("  3.         return i  // found", 30, algorithmTextY + 65, 16, LIGHTGRAY);
+            DrawText("  4. return -1  // not found", 30, algorithmTextY + 85, 16, LIGHTGRAY);
+        } else if (currentAlgo == "SORT") {
+            DrawText("BubbleSort():", 30, algorithmTextY, 18, WHITE);
+            DrawText("  1. for i = 0 to size-2:", 30, algorithmTextY + 25, 16, LIGHTGRAY);
+            DrawText("  2.     for j = 0 to size-2-i:", 30, algorithmTextY + 45, 16, LIGHTGRAY);
+            DrawText("  3.         if arr[j] > arr[j+1]:", 30, algorithmTextY + 65, 16, LIGHTGRAY);
+            DrawText("  4.             swap(arr[j], arr[j+1])", 30, algorithmTextY + 85, 16, LIGHTGRAY);
+        }
 
         EndDrawing();
     }

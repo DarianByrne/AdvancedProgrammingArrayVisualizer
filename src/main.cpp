@@ -344,6 +344,20 @@ public:
                 return 4;
             }
         }
+        // SORT algorithm (bubble sort)
+        else if (runningMode == Mode::SORTING) {
+            // Check if we're swapping (elements colored with COL_SWAP)
+            if (sortJ < currentSize - 1) {
+                if (elements[sortJ].color.r == COL_SWAP.r && 
+                    elements[sortJ].color.g == COL_SWAP.g && 
+                    elements[sortJ].color.b == COL_SWAP.b) {
+                    // Step 4: swapping
+                    return 4;
+                }
+            }
+            // Step 3: comparing arr[j] > arr[j+1]
+            return 3;
+        }
         return 0; // no highlight
     }
 
@@ -857,11 +871,16 @@ int main()
             DrawText("  4. return -1  // not found", 30, algorithmTextY + 85, 16, 
                      currentStep == 4 ? COL_ACTIVE : LIGHTGRAY);
         } else if (currentAlgo == "SORT") {
+            int currentStep = viz.GetCurrentAlgorithmStep();
             DrawText("BubbleSort():", 30, algorithmTextY, 18, WHITE);
-            DrawText("  1. for i = 0 to size-2:", 30, algorithmTextY + 25, 16, LIGHTGRAY);
-            DrawText("  2.     for j = 0 to size-2-i:", 30, algorithmTextY + 45, 16, LIGHTGRAY);
-            DrawText("  3.         if arr[j] > arr[j+1]:", 30, algorithmTextY + 65, 16, LIGHTGRAY);
-            DrawText("  4.             swap(arr[j], arr[j+1])", 30, algorithmTextY + 85, 16, LIGHTGRAY);
+            DrawText("  1. for i = 0 to size-2:", 30, algorithmTextY + 25, 16, 
+                     currentStep == 1 ? COL_ACTIVE : LIGHTGRAY);
+            DrawText("  2.     for j = 0 to size-2-i:", 30, algorithmTextY + 45, 16, 
+                     currentStep == 2 ? COL_ACTIVE : LIGHTGRAY);
+            DrawText("  3.         if arr[j] > arr[j+1]:", 30, algorithmTextY + 65, 16, 
+                     currentStep == 3 ? COL_ACTIVE : LIGHTGRAY);
+            DrawText("  4.             swap(arr[j], arr[j+1])", 30, algorithmTextY + 85, 16, 
+                     currentStep == 4 ? COL_ACTIVE : LIGHTGRAY);
         }
 
         EndDrawing();

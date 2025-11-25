@@ -635,13 +635,13 @@ struct IntTextInput {
         std::string display = content.empty() ? placeholder : content;
         int fs = 20;
         int tw = MeasureText(display.c_str(), fs);
-        Color col = content.empty() ? GRAY : BLACK;
+        Color col = content.empty() ? GRAY : WHITE;
         DrawText(display.c_str(), (int)(rect.x + 8), (int)(rect.y + rect.height * 0.5f - fs * 0.5f), fs, col);
 
         if (active) {
             // cursor
             int cx = (int)(rect.x + 8 + tw + 4);
-            DrawLine(cx, (int)(rect.y + 8), cx, (int)(rect.y + rect.height - 8), BLACK);
+            DrawLine(cx, (int)(rect.y + 8), cx, (int)(rect.y + rect.height - 8), WHITE);
         }
     }
 

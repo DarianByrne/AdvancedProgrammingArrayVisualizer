@@ -305,6 +305,7 @@ public:
     
     // Get current algorithm step for highlighting (1-based, 0 = none)
     int GetCurrentAlgorithmStep() const {
+        // INSERT algorithm
         if (runningMode == Mode::SHIFTING) {
             if (shiftingIndex >= insertionTargetIndex) {
                 // Step 1 and 2: for loop and shift operation
@@ -313,6 +314,35 @@ public:
         } else if (runningMode == Mode::INSERTING) {
             // Step 3: insert new value
             return 3;
+        }
+        // DELETE algorithm
+        else if (runningMode == Mode::DELETE_SHRINKING) {
+            // Shrinking the element (not shown in algorithm)
+            return 0;
+        } else if (runningMode == Mode::DELETE_SHIFTING) {
+            if (deleteShiftingIndex < currentSize) {
+                // Step 1 and 2: for loop and shift operation
+                return 2; // highlight the shift left operation
+            } else {
+                // Step 3: size-- (just completed)
+                return 3;
+            }
+        }
+        // SEARCH algorithm
+        else if (runningMode == Mode::SEARCHING) {
+            if (searchIndex < currentSize) {
+                // Step 2: checking if arr[i] == value
+                return 2;
+            }
+        } else if (runningMode == Mode::IDLE && lastOperation == "SEARCH") {
+            // Show result after search completes
+            if (searchResultIndex >= 0) {
+                // Step 3: found
+                return 3;
+            } else if (searchResultIndex == -1) {
+                // Step 4: not found
+                return 4;
+            }
         }
         return 0; // no highlight
     }
@@ -807,16 +837,25 @@ int main()
             DrawText("  4. size++", 30, algorithmTextY + 85, 16, 
                      currentStep == 4 ? COL_ACTIVE : LIGHTGRAY);
         } else if (currentAlgo == "DELETE") {
+            int currentStep = viz.GetCurrentAlgorithmStep();
             DrawText("Delete(index):", 30, algorithmTextY, 18, WHITE);
-            DrawText("  1. for i = index to size-2:", 30, algorithmTextY + 25, 16, LIGHTGRAY);
-            DrawText("  2.     arr[i] = arr[i+1]  // shift left", 30, algorithmTextY + 45, 16, LIGHTGRAY);
-            DrawText("  3. size--", 30, algorithmTextY + 65, 16, LIGHTGRAY);
+            DrawText("  1. for i = index to size-2:", 30, algorithmTextY + 25, 16, 
+                     currentStep == 1 ? COL_ACTIVE : LIGHTGRAY);
+            DrawText("  2.     arr[i] = arr[i+1]  // shift left", 30, algorithmTextY + 45, 16, 
+                     currentStep == 2 ? COL_ACTIVE : LIGHTGRAY);
+            DrawText("  3. size--", 30, algorithmTextY + 65, 16, 
+                     currentStep == 3 ? COL_ACTIVE : LIGHTGRAY);
         } else if (currentAlgo == "SEARCH") {
+            int currentStep = viz.GetCurrentAlgorithmStep();
             DrawText("LinearSearch(value):", 30, algorithmTextY, 18, WHITE);
-            DrawText("  1. for i = 0 to size-1:", 30, algorithmTextY + 25, 16, LIGHTGRAY);
-            DrawText("  2.     if arr[i] == value:", 30, algorithmTextY + 45, 16, LIGHTGRAY);
-            DrawText("  3.         return i  // found", 30, algorithmTextY + 65, 16, LIGHTGRAY);
-            DrawText("  4. return -1  // not found", 30, algorithmTextY + 85, 16, LIGHTGRAY);
+            DrawText("  1. for i = 0 to size-1:", 30, algorithmTextY + 25, 16, 
+                     currentStep == 1 ? COL_ACTIVE : LIGHTGRAY);
+            DrawText("  2.     if arr[i] == value:", 30, algorithmTextY + 45, 16, 
+                     currentStep == 2 ? COL_ACTIVE : LIGHTGRAY);
+            DrawText("  3.         return i  // found", 30, algorithmTextY + 65, 16, 
+                     currentStep == 3 ? COL_ACTIVE : LIGHTGRAY);
+            DrawText("  4. return -1  // not found", 30, algorithmTextY + 85, 16, 
+                     currentStep == 4 ? COL_ACTIVE : LIGHTGRAY);
         } else if (currentAlgo == "SORT") {
             DrawText("BubbleSort():", 30, algorithmTextY, 18, WHITE);
             DrawText("  1. for i = 0 to size-2:", 30, algorithmTextY + 25, 16, LIGHTGRAY);

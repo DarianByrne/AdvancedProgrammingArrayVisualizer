@@ -229,8 +229,10 @@ public:
             currentSize++;
             runningMode = Mode::INSERTING;
         } else {
-            // Start shifting from the last element
-            shiftingIndex = currentSize - 1;
+            // Increment size first to make room for shifting
+            currentSize++;
+            // Start shifting from the last filled element (currentSize-2, since we just incremented)
+            shiftingIndex = currentSize - 2;
             runningMode = Mode::SHIFTING;
         }
         
@@ -502,10 +504,8 @@ private:
     {
         // If we've shifted all elements down to the target index, insert the new element
         if (shiftingIndex < insertionTargetIndex) {
-            // Insert the new element by shifting array manually
+            // Insert the new element
             resetColors();
-            // Shift elements right to make space (already done in animation)
-            // Now just place the new element
             Vector2 newPos = indexToPos(insertionTargetIndex);
             Vector2 startPos = { newPos.x, newPos.y - 120.0f };
             VElement ve(insertionValue, startPos);
@@ -513,17 +513,19 @@ private:
             ve.scale = 0.7f;
             ve.color = COL_TARGET;
             elements[insertionTargetIndex] = ve;
-            currentSize++;
             
             runningMode = Mode::INSERTING;
             return;
         }
         
-        // Reset colors and highlight only current element
+        // Actually shift the element in the array
+        elements[shiftingIndex + 1] = elements[shiftingIndex];
+        
+        // Reset colors and highlight only current element being shifted
         resetColors();
-        elements[shiftingIndex].color = COL_ACTIVE;
+        elements[shiftingIndex + 1].color = COL_ACTIVE;
         Vector2 newTarget = indexToPos(shiftingIndex + 1);
-        elements[shiftingIndex].target = newTarget;
+        elements[shiftingIndex + 1].target = newTarget;
         
         // Move to the next element (going left)
         shiftingIndex--;

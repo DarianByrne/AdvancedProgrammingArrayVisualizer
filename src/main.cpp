@@ -302,6 +302,20 @@ public:
         }
         return lastOperation; // show last operation when idle
     }
+    
+    // Get current algorithm step for highlighting (1-based, 0 = none)
+    int GetCurrentAlgorithmStep() const {
+        if (runningMode == Mode::SHIFTING) {
+            if (shiftingIndex >= insertionTargetIndex) {
+                // Step 1 and 2: for loop and shift operation
+                return 2; // highlight the shift operation
+            }
+        } else if (runningMode == Mode::INSERTING) {
+            // Step 3: insert new value
+            return 3;
+        }
+        return 0; // no highlight
+    }
 
 private:
     enum class Mode { IDLE, INSERTING, SHIFTING, DELETING, DELETE_SHRINKING, DELETE_SHIFTING, SEARCHING, SORTING };
@@ -782,11 +796,16 @@ int main()
         std::string currentAlgo = viz.GetCurrentAlgorithm();
         
         if (currentAlgo == "INSERT") {
+            int currentStep = viz.GetCurrentAlgorithmStep();
             DrawText("Insert(value, index):", 30, algorithmTextY, 18, WHITE);
-            DrawText("  1. for i = size-1 down to index:", 30, algorithmTextY + 25, 16, LIGHTGRAY);
-            DrawText("  2.     arr[i+1] = arr[i]  // shift right", 30, algorithmTextY + 45, 16, LIGHTGRAY);
-            DrawText("  3. arr[index] = value     // insert new", 30, algorithmTextY + 65, 16, LIGHTGRAY);
-            DrawText("  4. size++", 30, algorithmTextY + 85, 16, LIGHTGRAY);
+            DrawText("  1. for i = size-1 down to index:", 30, algorithmTextY + 25, 16, 
+                     currentStep == 1 ? COL_ACTIVE : LIGHTGRAY);
+            DrawText("  2.     arr[i+1] = arr[i]  // shift right", 30, algorithmTextY + 45, 16, 
+                     currentStep == 2 ? COL_ACTIVE : LIGHTGRAY);
+            DrawText("  3. arr[index] = value     // insert new", 30, algorithmTextY + 65, 16, 
+                     currentStep == 3 ? COL_ACTIVE : LIGHTGRAY);
+            DrawText("  4. size++", 30, algorithmTextY + 85, 16, 
+                     currentStep == 4 ? COL_ACTIVE : LIGHTGRAY);
         } else if (currentAlgo == "DELETE") {
             DrawText("Delete(index):", 30, algorithmTextY, 18, WHITE);
             DrawText("  1. for i = index to size-2:", 30, algorithmTextY + 25, 16, LIGHTGRAY);
